@@ -35,6 +35,7 @@ const GenerateCertificate = () => {
     const [codeSerial, setCodeSerial] = useState("RFBM");
     const [codesStartNumber, setCodesStartNumber] = useState(0);
     const [date, setDate] = useState<Date>();
+    const [nameColumn, setNameColumn] = useState<string>("Name");
     const [columnDefs, setColumnDefs] = useState<ColDef[]>([]);
     const [rowData, setRowData] = useState<
         { Name: string; Department: string }[]
@@ -118,6 +119,7 @@ const GenerateCertificate = () => {
             formData.append("codes_start_number", codesStartNumber.toString());
             formData.append("design_data", JSON.stringify(designData));
             formData.append("date", date?.toDateString() as string);
+            formData.append("name_column", nameColumn);
 
             try {
                 const response = await fetch("/api/generate-certificates", {
@@ -236,6 +238,18 @@ const GenerateCertificate = () => {
                         columnDefs={columnDefs}
                         defaultColDef={{ flex: 1 }}
                         domLayout="normal"
+                    />
+                </div>
+                <div className="form-group">
+                    <label htmlFor="nameColumn">Name Column (from Excel):</label>
+                    <Input
+                        type="text"
+                        id="nameColumn"
+                        value={nameColumn}
+                        onChange={(e) => setNameColumn(e.target.value)}
+                        className="form-control"
+                        placeholder="e.g., Name, Participant Name, Full Name"
+                        required
                     />
                 </div>
                 <div className="form-group">

@@ -99,7 +99,8 @@ def generate_certificates_task(
     svg_template_content: Optional[bytes],
     date: str,
     overlay_format:str,
-    title: str
+    title: str,
+    name_column: str = "Name"
 ):
     design_data_obj = DesignData(**design_data_dict)
     
@@ -146,7 +147,7 @@ def generate_certificates_task(
 
     def overlay_qr_code(certificate, text, qr_code, text_position, qr_position, output_filename):
         draw = ImageDraw.Draw(certificate)
-        font_path = os.path.join(base_dir, 'static', 'fonts', 'bask-reg.ttf')
+        font_path = os.path.join(base_dir, 'static', 'fonts', 'AtkinsonHyperlegible-Bold.ttf')
         text_height = int(round(design_data_obj.textSize))
         font = ImageFont.truetype(font_path, text_height)
         text_width = font.getlength(text)
@@ -168,7 +169,9 @@ def generate_certificates_task(
         # if not pd.isna(row['Team Number']):
         #     output_certificates_path = f"{base_certificates_path}/Team-{int(row['Team Number'])}/"
         #     os.makedirs(output_certificates_path, exist_ok=True)   
-        name = row['Name']
+        if name_column not in row:
+            raise HTTPException(status_code=400, detail=f"Column '{name_column}' not found in Excel sheet. Available columns: {', '.join(df.columns.tolist())}")
+        name = row[name_column]
         fname = ' '.join(''.join((word[i].upper() if (i == 0 or (i < len(word) - 1 and word[i-1] == '.')) else char.lower()) for i, char in enumerate(word)) for word in name.split())
         code = fname.lower().replace(" ", "").replace(".", "") + code_serial + str(index + codes_start_number).zfill(4)
         qr_data = base_url + code
@@ -363,7 +366,7 @@ canvas {{
 }}
 ''')
 
-    with open(os.path.join(html_dir, "data.json"), 'w') as json_file:
+    with open(os.path.join(html_dir, "data.json"), 'a') as json_file:
         json.dump(all_certificates_data, json_file, indent=2)
 
 @app.post("/api/generate-certificates")
@@ -379,7 +382,8 @@ async def generate_certificates(
     excel: UploadFile = File(...),
     date: str = Form(...),
     svg_template: Optional[UploadFile] = File(None),
-    title: str = Form(...)
+    title: str = Form(...),
+    name_column: str = Form("Name")
 ):
     design_data_dict = json.loads(design_data)
 
@@ -402,7 +406,8 @@ async def generate_certificates(
         svg_template_content,
         date,
         overlay_format,
-        title
+        title,
+        name_column
     )
     
     return JSONResponse(content={"message": "Certificate generation is running in the background."})
