@@ -100,7 +100,8 @@ def generate_certificates_task(
     date: str,
     overlay_format:str,
     title: str,
-    name_column: str = "Name"
+    name_column: str = "Name",
+    verifiable: bool = True
 ):
     design_data_obj = DesignData(**design_data_dict)
     
@@ -145,22 +146,26 @@ def generate_certificates_task(
         img = qr.make_image(fill_color="black", back_color="white")
         img.save(qr_filename)
 
-    def overlay_qr_code(certificate, text, qr_code, text_position, qr_position, output_filename):
+    def overlay_qr_code(certificate, text, qr_code, text_position, qr_position, output_filename, include_qr=True):
         draw = ImageDraw.Draw(certificate)
-        font_path = os.path.join(base_dir, 'static', 'fonts', 'AtkinsonHyperlegible-Bold.ttf')
+        font_path = os.path.join(base_dir, 'static', 'fonts', 'AlexBrush-Regular.ttf')
         text_height = int(round(design_data_obj.textSize))
         font = ImageFont.truetype(font_path, text_height)
         text_width = font.getlength(text)
         text_x = text_position[0] - text_width // 2
         text_y = text_position[1]
         draw.text((text_x, text_y), text, fill=design_data_obj.textColor, font=font)
-        qr_size = int(round(design_data_obj.qrSize))
-        qr_code = qr_code.resize((qr_size, qr_size))
-        qr_alpha = qr_code.convert("RGBA").split()[3]
-        qr_overlay = Image.new("RGBA", certificate.size, (0, 0, 0, 0))
-        qr_overlay.paste(qr_code, qr_position, qr_alpha)
-        result = Image.alpha_composite(certificate.convert("RGBA"), qr_overlay)
-        result.save(output_filename)
+        
+        if include_qr:
+            qr_size = int(round(design_data_obj.qrSize))
+            qr_code = qr_code.resize((qr_size, qr_size))
+            qr_alpha = qr_code.convert("RGBA").split()[3]
+            qr_overlay = Image.new("RGBA", certificate.size, (0, 0, 0, 0))
+            qr_overlay.paste(qr_code, qr_position, qr_alpha)
+            result = Image.alpha_composite(certificate.convert("RGBA"), qr_overlay)
+            result.save(output_filename)
+        else:
+            certificate.convert("RGBA").save(output_filename)
     if svg_template_content:
         svg_content = svg_template_content.decode('utf-8')
     else:
@@ -173,11 +178,17 @@ def generate_certificates_task(
             raise HTTPException(status_code=400, detail=f"Column '{name_column}' not found in Excel sheet. Available columns: {', '.join(df.columns.tolist())}")
         name = row[name_column]
         fname = ' '.join(''.join((word[i].upper() if (i == 0 or (i < len(word) - 1 and word[i-1] == '.')) else char.lower()) for i, char in enumerate(word)) for word in name.split())
-        code = fname.lower().replace(" ", "").replace(".", "") + code_serial + str(index + codes_start_number).zfill(4)
-        qr_data = base_url + code
-        qr_filename = qr_path
-        generate_qr_code(qr_data, qr_filename)
-        qr_code = Image.open(qr_filename)
+        
+        if verifiable:
+            code = fname.lower().replace(" ", "").replace(".", "") + code_serial + str(index + codes_start_number).zfill(4)
+            qr_data = base_url + code
+            qr_filename = qr_path
+            generate_qr_code(qr_data, qr_filename)
+            qr_code = Image.open(qr_filename)
+        else:
+            code = None
+            qr_code = None
+            
         if "{Name}" in overlay_format:
             overlay_format_modified = overlay_format.replace("{Name}", "{fname}")
         else:
@@ -189,21 +200,22 @@ def generate_certificates_task(
         except KeyError as e:
             raise HTTPException(status_code=400, detail=f"Column '{e.args[0]}' not found in Excel sheet")
         text_position = (int(round(design_data_obj.textCenterCoordinates.x)), int(round(design_data_obj.textCenterCoordinates.y)))
-        qr_position = (int(round(design_data_obj.qrPosition.x)), int(round(design_data_obj.qrPosition.y)))
+        qr_position = (int(round(design_data_obj.qrPosition.x)), int(round(design_data_obj.qrPosition.y))) if verifiable else (0, 0)
         output_filename = os.path.join(output_certificates_path, f"{fname}.png")
-        overlay_qr_code(certificate_template.copy(), overlay_text, qr_code, text_position, qr_position, output_filename)
+        overlay_qr_code(certificate_template.copy(), overlay_text, qr_code, text_position, qr_position, output_filename, include_qr=verifiable)
         print(f"Certificate for {name} generated")
-        scaleX, scaleY, modified_svg = modify_svg(svg_content, overlay_text, qr_position[0], qr_position[1], text_position[0], text_position[1], design_data_obj.textColor, design_data_obj.textSize, (certificate_template.width, certificate_template.height))
-        certificate_data = {
-            "code": code,
-            "holder": overlay_text,
-            # "svg": modified_svg
-        }
-        all_certificates_data.append(certificate_data)
+        
+        if verifiable and svg_content:
+            scaleX, scaleY, modified_svg = modify_svg(svg_content, overlay_text, qr_position[0], qr_position[1], text_position[0], text_position[1], design_data_obj.textColor, design_data_obj.textSize, (certificate_template.width, certificate_template.height))
+            certificate_data = {
+                "code": code,
+                "holder": overlay_text,
+            }
+            all_certificates_data.append(certificate_data)
 
     
 
-    if svg_content:
+    if verifiable and svg_content:
         scaleX, scaleY, modified_svg = modify_svg(svg_content, overlay_text, qr_position[0], qr_position[1], text_position[0], text_position[1], design_data_obj.textColor, design_data_obj.textSize, (certificate_template.width, certificate_template.height))
 
         parsed_url = urlparse(base_url)
@@ -366,13 +378,13 @@ canvas {{
 }}
 ''')
 
-    with open(os.path.join(html_dir, "data.json"), 'a') as json_file:
-        json.dump(all_certificates_data, json_file, indent=2)
+        with open(os.path.join(html_dir, "data.json"), 'a') as json_file:
+            json.dump(all_certificates_data, json_file, indent=2)
 
 @app.post("/api/generate-certificates")
 async def generate_certificates(
     background_tasks: BackgroundTasks,
-    base_url: str = Form(...),
+    base_url: str = Form(""),
     output_directory: str = Form(...),
     code_serial: str = Form(...),
     codes_start_number: int = Form(...),
@@ -383,9 +395,11 @@ async def generate_certificates(
     date: str = Form(...),
     svg_template: Optional[UploadFile] = File(None),
     title: str = Form(...),
-    name_column: str = Form("Name")
+    name_column: str = Form("Name"),
+    verifiable: str = Form("true")
 ):
     design_data_dict = json.loads(design_data)
+    verifiable_bool = verifiable.lower() == "true"
 
     template_content = await template.read()
     excel_content = await excel.read()
@@ -407,7 +421,8 @@ async def generate_certificates(
         date,
         overlay_format,
         title,
-        name_column
+        name_column,
+        verifiable_bool
     )
     
     return JSONResponse(content={"message": "Certificate generation is running in the background."})

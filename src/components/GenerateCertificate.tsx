@@ -21,6 +21,7 @@ import { Calendar } from "./ui/calendar";
 import Link from "next/link";
 
 const GenerateCertificate = () => {
+    const [verifiable, setVerifiable] = useState(true);
     const [baseUrl, setBaseUrl] = useState(
         "https://cbitosc.github.io/verify24/reactfastapibootcampFM/?id="
     );
@@ -108,11 +109,16 @@ const GenerateCertificate = () => {
 
             // Merge designData into form data
             const formData = new FormData();
-            formData.append("base_url", baseUrl);
+            formData.append("verifiable", verifiable.toString());
+            if (verifiable) {
+                formData.append("base_url", baseUrl);
+            }
             formData.append("title", title);
             formData.append("template", templateFile as Blob);
             formData.append("overlay_format", textFormat);
-            formData.append("svg_template", svgFile as Blob);
+            if (verifiable && svgFile) {
+                formData.append("svg_template", svgFile as Blob);
+            }
             formData.append("excel", excelFile as Blob);
             formData.append("output_directory", outputDir);
             formData.append("code_serial", codeSerial);
@@ -204,6 +210,19 @@ const GenerateCertificate = () => {
                         required
                     />
                 </div>
+                <div className="form-group flex items-center space-x-3">
+                    <input
+                        type="checkbox"
+                        id="verifiable"
+                        checked={verifiable}
+                        onChange={(e) => setVerifiable(e.target.checked)}
+                        className="h-4 w-4 rounded border-gray-300"
+                    />
+                    <label htmlFor="verifiable" className="text-sm font-medium">
+                        Make certificates verifiable (includes QR code)
+                    </label>
+                </div>
+                {verifiable && (
                 <div className="form-group">
                     <label htmlFor="baseUrl">Base URL:</label>
                     <Input
@@ -215,6 +234,7 @@ const GenerateCertificate = () => {
                         required
                     />
                 </div>
+                )}
                 <div className="form-group">
                     <label htmlFor="excel">Upload Excel File (XLSX):</label>
                     <Input
@@ -314,6 +334,7 @@ const GenerateCertificate = () => {
                                             });
                                         }}
                                     />
+                                    {verifiable && (
                                     <Image
                                         image={qrImage as HTMLImageElement}
                                         width={qrSize} // Fixed size for QR code
@@ -329,6 +350,7 @@ const GenerateCertificate = () => {
                                             });
                                         }}
                                     />
+                                    )}
                                 </Layer>
                             </Stage>
                             {textRef.current != null && imageSize != null && (
@@ -363,6 +385,7 @@ const GenerateCertificate = () => {
                                                 }
                                             />
                                         </div>
+                                        {verifiable && (
                                         <div className="flex-1 flex flex-col">
                                             <label htmlFor="qrSize">
                                                 QR Code Size:
@@ -378,6 +401,7 @@ const GenerateCertificate = () => {
                                                 }
                                             />
                                         </div>
+                                        )}
                                     </div>
                                     <div className="flex space-x-4 w-full gap-4">
                                         <div className="flex-1">
@@ -454,6 +478,7 @@ const GenerateCertificate = () => {
                                             </Button>
                                         </div>
                                     </div>
+                                    {verifiable && (
                                     <div className="flex space-x-4 w-full gap-4">
                                         <div className="flex-1">
                                             <label htmlFor="qrX">
@@ -516,11 +541,13 @@ const GenerateCertificate = () => {
                                             </Button>
                                         </div>
                                     </div>
+                                    )}
                                 </div>
                             )}
                         </div>
                     )}
                 </div>
+                {verifiable && (
                 <div className="form-group">
                     <label htmlFor="svg">
                         Upload SVG File (SVG):{" "}
@@ -544,6 +571,7 @@ const GenerateCertificate = () => {
                         accept=".svg"
                     />
                 </div>
+                )}
                 <div className="form-group">
                     <label htmlFor="outputDir">Output Directory:</label>
                     <Input
