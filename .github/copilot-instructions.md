@@ -20,7 +20,7 @@ Key points for an AI coding agent to be immediately productive:
 - Project conventions & gotchas
   - Client vs Server components: components with DOM/dragging logic use `"use client"` (see `GenerateCertificate.tsx`). Use `src/components/Dynamic.tsx` for client-only mounting patterns.
   - Excel import: `GenerateCertificate` expects the first row to be headers. The backend expects at least a `Name` column (used to compose codes). Missing headers will raise an HTTP 400.
-  - Overlay format placeholders: use `{Name}` or other Excel header names in `overlay_format`. Backend replaces `{Name}` with `fname` (sanitized name) — check `src/api/index.py` for exact formatting behavior.
+  - Dynamic overlays now let you define multiple text fields, each with its own `{column}` placeholders. The frontend builds `design_data.overlays` with `textFormat` strings taken directly from the Excel headers. The backend formats each overlay against row values and no longer looks for a separate `overlay_format` or hard‑coded name column.
   - Dev proxy: frontend uses `/api/*` at runtime; when adding new backend endpoints, ensure rewrites in `next.config.mjs` still cover them.
   - Native modules: the repo lists `canvas` and `konva`. `canvas` may require native build steps on some platforms; `next.config.mjs` already marks `canvas` as an external to avoid client bundling — be careful when editing code that imports `canvas`.
 

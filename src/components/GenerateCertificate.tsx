@@ -28,19 +28,35 @@ const GenerateCertificate = () => {
     const [title, setTitle] = useState("React JS & FastAPI Bootcamp")
     const [templateFile, setTemplateFile] = useState<File | null>(null);
     const [excelFile, setExcelFile] = useState<File | null>(null);
-    const [textFormat, setTextFormat] = useState<string>(
-        "{Name} of {Department} Department"
-    );
+    // overlays represent each piece of dynamic text that can be positioned individually
+    type Overlay = {
+        id: number;
+        textFormat: string;
+        position: { x: number; y: number };
+        size: number;
+        color: string;
+        fontFamily?: string;
+        fontFile?: File | null;
+    };
+
+    const [overlays, setOverlays] = useState<Overlay[]>([
+        {
+            id: 1,
+            textFormat: "{Name} of {Department} Department",
+            position: { x: 100, y: 100 },
+            size: 90,
+            color: "#000000",
+        },
+    ]);
+    const overlayRefs = useRef<{ [key: number]: any }>({});
+
     const [svgFile, setSvgFile] = useState<File | null>(null);
     const [outputDir, setOutputDir] = useState("");
     const [codeSerial, setCodeSerial] = useState("RFBM");
     const [codesStartNumber, setCodesStartNumber] = useState(0);
     const [date, setDate] = useState<Date>();
-    const [nameColumn, setNameColumn] = useState<string>("Name");
     const [columnDefs, setColumnDefs] = useState<ColDef[]>([]);
-    const [rowData, setRowData] = useState<
-        { Name: string; Department: string }[]
-    >([]);
+    const [rowData, setRowData] = useState<any[]>([]);
     const { resolvedTheme } = useTheme();
 
     const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -88,23 +104,28 @@ const GenerateCertificate = () => {
         event.preventDefault();
 
         if (imageSize) {
-            // Collect data related to the certificate design
-            const textRect = textRef.current.getClientRect();
-            const textCenterCoordinates = {
-                x: textPosition.x / scale + textRect.width / scale / 2,
-                y: textPosition.y / scale,
-            };
+            // prepare overlay-specific data
+            const overlaysDesign = overlays.map((ov) => {
+                const ref = overlayRefs.current[ov.id];
+                const rect = ref?.getClientRect();
+                const centerX = ov.position.x / scale + (rect ? rect.width / scale / 2 : 0);
+                const centerY = ov.position.y / scale;
+                return {
+                    textFormat: ov.textFormat,
+                    textSize: ov.size,
+                    textColor: ov.color,
+                    textCenterCoordinates: { x: centerX, y: centerY },
+                };
+            });
 
             const designData = {
-                textSize,
-                textColor,
                 imageSize,
-                textCenterCoordinates,
                 qrSize,
                 qrPosition: {
                     x: qrPosition.x / scale,
                     y: qrPosition.y / scale,
                 },
+                overlays: overlaysDesign,
             };
 
             // Merge designData into form data
@@ -115,7 +136,7 @@ const GenerateCertificate = () => {
             }
             formData.append("title", title);
             formData.append("template", templateFile as Blob);
-            formData.append("overlay_format", textFormat);
+            // we won't send a single overlay_format anymore; backend reads from designData.overlays
             if (verifiable && svgFile) {
                 formData.append("svg_template", svgFile as Blob);
             }
@@ -125,7 +146,20 @@ const GenerateCertificate = () => {
             formData.append("codes_start_number", codesStartNumber.toString());
             formData.append("design_data", JSON.stringify(designData));
             formData.append("date", date?.toDateString() as string);
-            formData.append("name_column", nameColumn);
+
+            overlays.forEach((ov, i) => {
+                if (ov.fontFile) {
+                    formData.append("fonts", ov.fontFile);
+                } else {
+                    formData.append("fonts", new Blob([""], { type: "application/octet-stream" }), `empty_${i}.ttf`);
+                }
+            });
+
+            // debug output: list all keys being sent
+            console.log("FormData entries:");
+            for (const pair of formData.entries()) {
+                console.log(pair[0], pair[1]);
+            }
 
             try {
                 const response = await fetch("/api/generate-certificates", {
@@ -134,13 +168,15 @@ const GenerateCertificate = () => {
                 });
 
                 if (!response.ok) {
+                    const text = await response.text();
+                    console.error("Server returned non-OK status", response.status, text);
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
 
                 alert("Certificates generation started!");
             } catch (error) {
                 console.error(error);
-                alert("An error occurred while generating certificates.");
+                alert("An error occurred while generating certificates. See console for details.");
             }
         } else {
             alert("Please complete the design.");
@@ -149,18 +185,15 @@ const GenerateCertificate = () => {
 
     // State and logic for the CertificateDesigner component
     const [templateImage, setTemplateImage] = useState<string | null>(null);
-    const [textSize, setTextSize] = useState(90);
+    // the single-text-specific states were removed; overlay info is used instead
     const [image, setImage] = useState<HTMLImageElement | null>(null);
     const [qrImage] = useImage("/qr_code.png");
     const [imageSize, setImageSize] = useState<{
         width: number;
         height: number;
     } | null>(null);
-    const [textPosition, setTextPosition] = useState({ x: 100, y: 100 });
     const [qrPosition, setQrPosition] = useState({ x: 200, y: 200 });
     const [qrSize, setQrSize] = useState(400);
-    const [textColor, setTextColor] = useState("#000000");
-    const textRef = useRef<any>(null);
     const [loadedImage] = useImage(templateImage || "");
 
     useEffect(() => {
@@ -261,27 +294,151 @@ const GenerateCertificate = () => {
                     />
                 </div>
                 <div className="form-group">
-                    <label htmlFor="nameColumn">Name Column (from Excel):</label>
-                    <Input
-                        type="text"
-                        id="nameColumn"
-                        value={nameColumn}
-                        onChange={(e) => setNameColumn(e.target.value)}
-                        className="form-control"
-                        placeholder="e.g., Name, Participant Name, Full Name"
-                        required
-                    />
-                </div>
-                <div className="form-group">
-                    <label htmlFor="textFormat">Dynamic Text Format:</label>
-                    <Input
-                        type="text"
-                        id="textFormat"
-                        value={textFormat}
-                        onChange={(e) => setTextFormat(e.target.value)}
-                        className="form-control"
-                        required
-                    />
+                    <label className="block mb-2">Dynamic Text Overlays:</label>
+                    {overlays.map((ov, idx) => (
+                        <div key={ov.id} className="border p-2 mb-2">
+                            <div className="flex justify-between items-center">
+                                <strong>Overlay {idx + 1}</strong>
+                                <Button
+                                    type="button"
+                                    variant="destructive"
+                                    onClick={() => {
+                                        setOverlays(overlays.filter((o) => o.id !== ov.id));
+                                    }}
+                                    size="sm"
+                                >
+                                    Remove
+                                </Button>
+                            </div>
+                            <div className="flex flex-col space-y-4 mt-2">
+                                <div className="flex space-x-4">
+                                    <div className="flex-1">
+                                        <label>Format:</label>
+                                        <Input
+                                            type="text"
+                                            value={ov.textFormat}
+                                            onChange={(e) => {
+                                                const updated = [...overlays];
+                                                updated[idx].textFormat = e.target.value;
+                                                setOverlays(updated);
+                                            }}
+                                        />
+                                    </div>
+                                    <div className="flex-1">
+                                        <label>Font Size:</label>
+                                        <Input
+                                            type="number"
+                                            value={ov.size}
+                                            onChange={(e) => {
+                                                const updated = [...overlays];
+                                                updated[idx].size = Number(e.target.value);
+                                                setOverlays(updated);
+                                            }}
+                                        />
+                                    </div>
+                                    <div className="flex-1">
+                                        <label>Color:</label>
+                                        <div className="flex items-center space-x-2">
+                                            <Input
+                                                type="color"
+                                                value={ov.color}
+                                                onChange={(e) => {
+                                                    const updated = [...overlays];
+                                                    updated[idx].color = e.target.value;
+                                                    setOverlays(updated);
+                                                }}
+                                                className="w-12 h-10 p-1 cursor-pointer"
+                                            />
+                                            <Input
+                                                type="text"
+                                                value={ov.color}
+                                                onChange={(e) => {
+                                                    const updated = [...overlays];
+                                                    updated[idx].color = e.target.value;
+                                                    setOverlays(updated);
+                                                }}
+                                                className="uppercase"
+                                            />
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="flex space-x-4 items-end">
+                                    <div className="flex-1">
+                                        <label>Custom Font (.ttf):</label>
+                                        <Input
+                                            type="file"
+                                            accept=".ttf,.otf"
+                                            onChange={async (e) => {
+                                                const file = e.target.files?.[0];
+                                                if (file) {
+                                                    try {
+                                                        const fontUrl = URL.createObjectURL(file);
+                                                        const fontName = `CustomFont_${ov.id}_${Date.now()}`;
+                                                        const font = new FontFace(fontName, `url(${fontUrl})`);
+                                                        await font.load();
+                                                        document.fonts.add(font);
+                                                        const updated = [...overlays];
+                                                        updated[idx].fontFamily = fontName;
+                                                        updated[idx].fontFile = file;
+                                                        setOverlays(updated);
+                                                    } catch (err) {
+                                                        console.error("Font loading error", err);
+                                                        alert("Failed to load font visually. It will still be sent to the server.");
+                                                        const updated = [...overlays];
+                                                        updated[idx].fontFile = file;
+                                                        setOverlays(updated);
+                                                    }
+                                                }
+                                            }}
+                                        />
+                                    </div>
+                                    <div>
+                                        <Button
+                                            type="button"
+                                            variant="outline"
+                                            onClick={() => {
+                                                if (imageSize) {
+                                                    const ref = overlayRefs.current[ov.id];
+                                                    const rect = ref?.getClientRect();
+                                                    const textWidthRaw = rect ? rect.width / scale : 0;
+                                                    const newX = (imageSize.width / 2 - textWidthRaw / 2) * scale;
+                                                    
+                                                    const updated = [...overlays];
+                                                    updated[idx].position = { ...updated[idx].position, x: newX };
+                                                    setOverlays(updated);
+                                                } else {
+                                                    alert("Please upload a template image first to center the text.");
+                                                }
+                                            }}
+                                        >
+                                            Center Horizontally
+                                        </Button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    ))}
+                    <Button
+                        type="button"
+                        onClick={() => {
+                            const maxId = overlays.reduce(
+                                (m, o) => Math.max(m, o.id),
+                                0
+                            );
+                            setOverlays([
+                                ...overlays,
+                                {
+                                    id: maxId + 1,
+                                    textFormat: "",
+                                    position: { x: 50, y: 50 },
+                                    size: 90,
+                                    color: "#000000",
+                                },
+                            ]);
+                        }}
+                    >
+                        + Add Overlay
+                    </Button>
                 </div>
                 <div className="mt-10">
                     <label htmlFor="template">
@@ -316,24 +473,39 @@ const GenerateCertificate = () => {
                                             height={imageSize?.height || 600}
                                         />
                                     )}
-                                    <Text
-                                        text={textFormat}
-                                        fontSize={textSize}
-                                        fill={textColor}
-                                        x={textPosition.x / scale}
-                                        y={textPosition.y / scale}
-                                        ref={textRef}
-                                        draggable
-                                        align="center"
-                                        verticalAlign="middle"
-                                        onDragEnd={(e) => {
-                                            const { x, y } = e.target.attrs;
-                                            setTextPosition({
-                                                x: x * scale,
-                                                y: y * scale,
-                                            });
-                                        }}
-                                    />
+                                    {overlays.map((ov) => (
+                                        <Text
+                                            key={ov.id}
+                                            text={ov.textFormat}
+                                            fontSize={ov.size}
+                                            fill={ov.color}
+                                            fontFamily={ov.fontFamily || "Arial"}
+                                            x={ov.position.x / scale}
+                                            y={ov.position.y / scale}
+                                            ref={(node) => {
+                                                if (node) overlayRefs.current[ov.id] = node;
+                                            }}
+                                            draggable
+                                            align="center"
+                                            verticalAlign="middle"
+                                            onDragEnd={(e) => {
+                                                const { x, y } = e.target.attrs;
+                                                setOverlays((prev) =>
+                                                    prev.map((o) =>
+                                                        o.id === ov.id
+                                                            ? {
+                                                                  ...o,
+                                                                  position: {
+                                                                      x: x * scale,
+                                                                      y: y * scale,
+                                                                  },
+                                                              }
+                                                            : o
+                                                    )
+                                                );
+                                            }}
+                                        />
+                                    ))}
                                     {verifiable && (
                                     <Image
                                         image={qrImage as HTMLImageElement}
@@ -353,132 +525,27 @@ const GenerateCertificate = () => {
                                     )}
                                 </Layer>
                             </Stage>
-                            {textRef.current != null && imageSize != null && (
+                            {imageSize != null && (
                                 <div className="mt-4 space-y-4 w-full">
                                     <div className="flex space-x-4 w-full gap-4">
-                                        <div className="flex-1">
-                                            <label htmlFor="textSize">
-                                                Font Size:
-                                            </label>
-                                            <Input
-                                                type="text"
-                                                id="textSize"
-                                                value={textSize}
-                                                onChange={(e) => {
-                                                    // We directly update the `x` position without adding or subtracting width
-                                                    setTextSize(
-                                                        Number(e.target.value)
-                                                    );
-                                                }}
-                                            />
-                                        </div>
-                                        <div className="flex-1">
-                                            <label htmlFor="textColor">
-                                                Text Color:
-                                            </label>
-                                            <Input
-                                                type="text"
-                                                id="textColor"
-                                                value={textColor}
-                                                onChange={(e) =>
-                                                    setTextColor(e.target.value)
-                                                }
-                                            />
-                                        </div>
                                         {verifiable && (
-                                        <div className="flex-1 flex flex-col">
-                                            <label htmlFor="qrSize">
-                                                QR Code Size:
-                                            </label>
-                                            <Input
-                                                type="text"
-                                                id="qrSize"
-                                                value={qrSize}
-                                                onChange={(e) =>
-                                                    setQrSize(
-                                                        Number(e.target.value)
-                                                    )
-                                                }
-                                            />
-                                        </div>
+                                            <div className="flex-1 flex flex-col">
+                                                <label htmlFor="qrSize">
+                                                    QR Code Size:
+                                                </label>
+                                                <Input
+                                                    type="text"
+                                                    id="qrSize"
+                                                    value={qrSize}
+                                                    onChange={(e) =>
+                                                        setQrSize(
+                                                            Number(e.target.value)
+                                                        )
+                                                    }
+                                                />
+                                            </div>
                                         )}
                                     </div>
-                                    <div className="flex space-x-4 w-full gap-4">
-                                        <div className="flex-1">
-                                            <label htmlFor="textX">
-                                                Text X Coordinate (Center):
-                                            </label>
-                                            <Input
-                                                type="text"
-                                                id="textX"
-                                                value={
-                                                    (textPosition.x +
-                                                        textRef.current.getClientRect()
-                                                            .width /
-                                                            2) /
-                                                    scale
-                                                }
-                                                onChange={(e) => {
-                                                    // We directly update the `x` position without adding or subtracting width
-                                                    const centerX = Number(
-                                                        e.target.value
-                                                    );
-                                                    const updatedX =
-                                                        centerX * scale -
-                                                        textRef.current.getClientRect()
-                                                            .width /
-                                                            2;
-                                                    setTextPosition({
-                                                        ...textPosition,
-                                                        x: updatedX,
-                                                    });
-                                                }}
-                                            />
-                                        </div>
-                                        <div className="flex-1">
-                                            <label htmlFor="textY">
-                                                Text Y Coordinate (Top):
-                                            </label>
-                                            <Input
-                                                type="text"
-                                                id="textY"
-                                                value={textPosition.y / scale}
-                                                onChange={(e) =>
-                                                    setTextPosition({
-                                                        ...textPosition,
-                                                        y:
-                                                            Number(
-                                                                e.target.value
-                                                            ) * scale,
-                                                    })
-                                                }
-                                            />
-                                        </div>
-                                        <div className="flex-1 flex flex-col">
-                                            <label htmlFor="textY">
-                                                Horizontal
-                                            </label>
-                                            <Button
-                                                type="button"
-                                                variant={"outline"}
-                                                onClick={() => {
-                                                    setTextPosition({
-                                                        ...textPosition,
-                                                        x: Number(
-                                                            (imageSize?.width *
-                                                                scale -
-                                                                textRef.current.getClientRect()
-                                                                    .width) /
-                                                                2
-                                                        ),
-                                                    });
-                                                }}
-                                            >
-                                                Center
-                                            </Button>
-                                        </div>
-                                    </div>
-                                    {verifiable && (
                                     <div className="flex space-x-4 w-full gap-4">
                                         <div className="flex-1">
                                             <label htmlFor="qrX">
@@ -541,7 +608,6 @@ const GenerateCertificate = () => {
                                             </Button>
                                         </div>
                                     </div>
-                                    )}
                                 </div>
                             )}
                         </div>
