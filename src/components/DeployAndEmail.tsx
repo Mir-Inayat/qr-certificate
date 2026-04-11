@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useSession, signIn, signOut } from "next-auth/react";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -21,6 +21,20 @@ export default function DeployAndEmail() {
     const [repoOwner, setRepoOwner] = useState("");
     const [repoName, setRepoName] = useState("");
     const [deployStatus, setDeployStatus] = useState("");
+    const [availableDirs, setAvailableDirs] = useState<string[]>([]);
+
+    useEffect(() => {
+        fetch("/api/list-directories").then(r => r.json()).then(d => {
+            if (d.directories) {
+                setAvailableDirs(d.directories);
+            }
+        }).catch(e => console.error("Could not fetch dirs", e));
+
+        const saved = sessionStorage.getItem("latestOutputDir");
+        if (saved && !outputDir) {
+            setOutputDir(saved);
+        }
+    }, []);
 
     // Email
     const [emailCol, setEmailCol] = useState("Email Address");
@@ -181,8 +195,14 @@ export default function DeployAndEmail() {
                         onChange={(e) => setOutputDir(e.target.value)}
                         placeholder="Output directory name"
                         className="max-w-md bg-secondary border"
+                        list="local-directories"
                         required
                     />
+                    <datalist id="local-directories">
+                        {availableDirs.map(dir => (
+                            <option key={dir} value={dir} />
+                        ))}
+                    </datalist>
                     <Button onClick={handleLoadPreview}>Load Excel Preview</Button>
                 </div>
                 
@@ -227,11 +247,25 @@ export default function DeployAndEmail() {
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
                                     <label className="block text-sm mb-1 font-medium">Email Column</label>
-                                    <Input value={emailCol} onChange={(e) => setEmailCol(e.target.value)} placeholder="e.g. Email Address" className="bg-secondary" />
+                                    {previewCols.length > 0 ? (
+                                        <select value={emailCol} onChange={(e) => setEmailCol(e.target.value)} className="flex h-10 w-full rounded-md border border-input bg-secondary px-3 py-2 text-sm ring-offset-background disabled:cursor-not-allowed disabled:opacity-50">
+                                            <option value="" disabled>-- Select Column --</option>
+                                            {previewCols.map(col => <option key={col.field} value={col.field}>{col.field}</option>)}
+                                        </select>
+                                    ) : (
+                                        <Input value={emailCol} onChange={(e) => setEmailCol(e.target.value)} placeholder="Load preview first" className="bg-secondary" />
+                                    )}
                                 </div>
                                 <div>
                                     <label className="block text-sm mb-1 font-medium">Name Column</label>
-                                    <Input value={nameCol} onChange={(e) => setNameCol(e.target.value)} placeholder="e.g. Name" className="bg-secondary" />
+                                    {previewCols.length > 0 ? (
+                                        <select value={nameCol} onChange={(e) => setNameCol(e.target.value)} className="flex h-10 w-full rounded-md border border-input bg-secondary px-3 py-2 text-sm ring-offset-background disabled:cursor-not-allowed disabled:opacity-50">
+                                            <option value="" disabled>-- Select Column --</option>
+                                            {previewCols.map(col => <option key={col.field} value={col.field}>{col.field}</option>)}
+                                        </select>
+                                    ) : (
+                                        <Input value={nameCol} onChange={(e) => setNameCol(e.target.value)} placeholder="Load preview first" className="bg-secondary" />
+                                    )}
                                 </div>
                             </div>
                             
@@ -292,6 +326,16 @@ export default function DeployAndEmail() {
                         <div>
                             <label className="block text-sm mb-1 font-medium">Personal Access Token (PAT)</label>
                             <Input type="password" value={githubToken} onChange={(e) => setGithubToken(e.target.value)} placeholder="ghp_XXXXXXXXXXXXXXXXXXXX" className="bg-secondary" />
+                            <details className="mt-2 text-xs text-muted-foreground bg-secondary/50 p-2 rounded border">
+                                <summary className="cursor-pointer font-medium hover:text-foreground">Need help creating a secure GitHub PAT?</summary>
+                                <div className="mt-2 space-y-2 p-1">
+                                    <p>1. Go to your GitHub <strong>Settings</strong> &rarr; <strong>Developer settings</strong> &rarr; <strong>Personal access tokens</strong> &rarr; <strong>Fine-grained tokens</strong>.</p>
+                                    <p>2. Click <strong>Generate new token</strong>.</p>
+                                    <p>3. Under <strong>Repository access</strong>, select <strong>Only select repositories</strong> and pick your target repository.</p>
+                                    <p>4. Under <strong>Permissions</strong> &rarr; <strong>Repository permissions</strong>, find <strong>Contents</strong> and set it to <strong>Read and Write</strong>.</p>
+                                    <p>5. Generate and paste the token here.</p>
+                                </div>
+                            </details>
                         </div>
                         <div>
                             <label className="block text-sm mb-1 font-medium">Repository Owner</label>

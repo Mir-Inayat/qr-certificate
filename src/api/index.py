@@ -24,6 +24,9 @@ app = FastAPI()
 
 base_dir = os.path.dirname(os.path.abspath(__file__))
 
+generation_status = {}
+
+
 class Coordinates(BaseModel):
     x: float
     y: float
@@ -182,6 +185,7 @@ def generate_certificates_task(
     
     certificate_template = Image.open(template_path)
     df = pd.read_excel(excel_path)
+    generation_status[output_directory]["total"] = len(df)
 
     all_certificates_data = []
     
@@ -300,6 +304,7 @@ def generate_certificates_task(
             cert_copy.save(output_filename)
             
         print(f"Certificate for {fname} generated")
+        generation_status[output_directory]["current"] += 1
 
         if verifiable and svg_content:
             # prepare modifications per row for the certificate data only (no svg used here)
@@ -518,6 +523,36 @@ canvas {{
         with open(os.path.join(html_dir, "data.json"), 'a') as json_file:
             json.dump(all_certificates_data, json_file, indent=2)
 
+        pass
+
+def generate_wrapped_task(*args, **kwargs):
+    output_directory = args[1]
+    import traceback
+    generation_status[output_directory] = {"total": 0, "current": 0, "status": "running"}
+    try:
+        generate_certificates_task(*args, **kwargs)
+        generation_status[output_directory]["status"] = "completed"
+    except Exception as e:
+        generation_status[output_directory]["status"] = "failed"
+        generation_status[output_directory]["error"] = str(e)
+        traceback.print_exc()
+
+@app.get("/api/generation-status")
+async def get_generation_status(output_directory: str):
+    status = generation_status.get(output_directory, {"status": "not_found"})
+    return JSONResponse(content=status)
+
+@app.get("/api/list-directories")
+async def list_directories():
+    directories = []
+    for d in os.listdir(base_dir):
+        full_path = os.path.join(base_dir, d)
+        if os.path.isdir(full_path):
+            if os.path.exists(os.path.join(full_path, "data.xlsx")) or os.path.exists(os.path.join(full_path, "certificates")):
+                if d != "static" and d != "__pycache__":
+                    directories.append(d)
+    return JSONResponse(content={"directories": directories})
+
 @app.post("/api/generate-certificates")
 async def generate_certificates(
     background_tasks: BackgroundTasks,
@@ -565,7 +600,7 @@ async def generate_certificates(
         font_contents.append(content if len(content) > 0 else None)
 
     background_tasks.add_task(
-        generate_certificates_task,
+        generate_wrapped_task,
         base_url,
         output_directory,
         code_serial,

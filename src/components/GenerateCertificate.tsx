@@ -22,10 +22,8 @@ import Link from "next/link";
 
 const GenerateCertificate = () => {
     const [verifiable, setVerifiable] = useState(true);
-    const [baseUrl, setBaseUrl] = useState(
-        "https://cbitosc.github.io/verify24/reactfastapibootcampFM/?id="
-    );
-    const [title, setTitle] = useState("React JS & FastAPI Bootcamp")
+    const [baseUrl, setBaseUrl] = useState("");
+    const [title, setTitle] = useState("");
     const [templateFile, setTemplateFile] = useState<File | null>(null);
     const [excelFile, setExcelFile] = useState<File | null>(null);
     // overlays represent each piece of dynamic text that can be positioned individually
@@ -42,7 +40,7 @@ const GenerateCertificate = () => {
     const [overlays, setOverlays] = useState<Overlay[]>([
         {
             id: 1,
-            textFormat: "{Name} of {Department} Department",
+            textFormat: "",
             position: { x: 100, y: 100 },
             size: 90,
             color: "#000000",
@@ -59,6 +57,10 @@ const GenerateCertificate = () => {
     const [rowData, setRowData] = useState<any[]>([]);
     const [outputFormat, setOutputFormat] = useState("png");
     const { resolvedTheme } = useTheme();
+
+    const [isGenerating, setIsGenerating] = useState(false);
+    const [genStatus, setGenStatus] = useState<any>(null);
+    const [genCompleted, setGenCompleted] = useState(false);
 
     const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
         const file = event.target.files?.[0];
@@ -182,7 +184,30 @@ const GenerateCertificate = () => {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
 
-                alert("Certificates generation started!");
+                setIsGenerating(true);
+                setGenCompleted(false);
+                setGenStatus(null);
+                sessionStorage.setItem("latestOutputDir", outputDir);
+
+                const pollStatus = setInterval(async () => {
+                    try {
+                        const res = await fetch(`/api/generation-status?output_directory=${encodeURIComponent(outputDir)}`);
+                        const data = await res.json();
+                        setGenStatus(data);
+                        if (data.status === "completed" || data.status === "failed") {
+                            clearInterval(pollStatus);
+                            setIsGenerating(false);
+                            if (data.status === "completed") {
+                                setGenCompleted(true);
+                            }
+                        }
+                    } catch(e) {
+                        console.error(e);
+                        clearInterval(pollStatus);
+                        setIsGenerating(false);
+                    }
+                }, 2000);
+
             } catch (error) {
                 console.error(error);
                 alert("An error occurred while generating certificates. See console for details.");
@@ -331,6 +356,7 @@ const GenerateCertificate = () => {
                                                 updated[idx].textFormat = e.target.value;
                                                 setOverlays(updated);
                                             }}
+                                            placeholder="{Name} of {Department} Department"
                                         />
                                     </div>
                                     <div className="flex-1">
@@ -740,9 +766,33 @@ const GenerateCertificate = () => {
                         </PopoverContent>
                     </Popover>
                 </div>
-                <Button type="submit" className="btn btn-primary">
-                    Generate Certificates
-                </Button>
+                <div className="flex flex-col gap-4">
+                    <Button type="submit" className="btn btn-primary w-fit" disabled={isGenerating}>
+                        {isGenerating ? "Generating..." : "Generate Certificates"}
+                    </Button>
+
+                    {isGenerating && genStatus && (
+                        <div className="p-4 border rounded-lg text-sm bg-accent flex items-center gap-3 w-fit">
+                            <span className="animate-spin h-3 w-3 inline-block rounded-full bg-blue-500"></span>
+                            <span>
+                                Generating... {genStatus.current} / {genStatus.total} completed.
+                            </span>
+                        </div>
+                    )}
+                    {genCompleted && (
+                        <div className="p-4 border rounded-lg text-sm bg-green-100 dark:bg-green-900 border-green-500 flex flex-col gap-3 w-fit">
+                            <span className="text-green-700 dark:text-green-300 font-semibold">Generation Completed Successfully!</span>
+                            <Link href="/distribute">
+                                <Button variant="default">Go to Distribute Page</Button>
+                            </Link>
+                        </div>
+                    )}
+                    {genStatus?.status === 'failed' && (
+                        <div className="p-4 border rounded-lg text-sm bg-red-100 dark:bg-red-900 border-red-500 w-fit">
+                            <span className="text-red-700 dark:text-red-300 font-semibold">Generation failed: {genStatus.error}</span>
+                        </div>
+                    )}
+                </div>
             </form>
         </div>
     );
