@@ -1,5 +1,5 @@
 from fastapi import FastAPI, File, UploadFile, Form, BackgroundTasks, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 import os
 import qrcode
@@ -9,6 +9,16 @@ import json
 from typing import Optional, List
 from lxml import etree
 from urllib.parse import urlparse
+
+import base64
+import time
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.mime.application import MIMEApplication
+from google.oauth2.credentials import Credentials
+from googleapiclient.discovery import build
+import re
+from github import Github, InputGitTreeElement
 
 app = FastAPI()
 
@@ -80,7 +90,7 @@ def modify_svg(svg_content: str, overlays: list, overlay_texts: list, qr_x: int,
             "fill": text_color,
             "text-anchor": "middle",
             "alignment-baseline": "middle",
-            "class": "certificate-text"
+            "class": f"certificate-text cert-text-{idx}"
         }
         # keep id for first overlay so JS can target it
         if idx == 0:
@@ -118,7 +128,8 @@ def generate_certificates_task(
     date: str,
     title: str,
     verifiable: bool = True,
-    font_contents: List[bytes] = None
+    font_contents: List[bytes] = None,
+    output_format: str = "png"
 ):
     design_data_obj = DesignData(**design_data_dict)
     if not design_data_obj.overlays:
@@ -158,9 +169,13 @@ def generate_certificates_task(
     with open(template_path, "wb") as f:
         f.write(template_content)
     
+    excel_copy_path = os.path.join(output_directory_path, "data.xlsx")
+    with open(excel_copy_path, "wb") as f:
+        f.write(excel_content)
+
     with open(excel_path, "wb") as f:
         f.write(excel_content)
-    
+
     if svg_template_content:
         with open(svg_template_path, "wb") as f:
             f.write(svg_template_content)
@@ -277,8 +292,13 @@ def generate_certificates_task(
             qr_overlay.paste(qr_code_resized, (int(round(design_data_obj.qrPosition.x)), int(round(design_data_obj.qrPosition.y))), qr_alpha)
             cert_copy = Image.alpha_composite(cert_copy.convert("RGBA"), qr_overlay)
 
-        output_filename = os.path.join(output_certificates_path, f"{fname}.png")
-        cert_copy.save(output_filename)
+        if output_format.lower() == "pdf":
+            output_filename = os.path.join(output_certificates_path, f"{fname}.pdf")
+            cert_copy.convert("RGB").save(output_filename, "PDF", resolution=100.0)
+        else:
+            output_filename = os.path.join(output_certificates_path, f"{fname}.png")
+            cert_copy.save(output_filename)
+            
         print(f"Certificate for {fname} generated")
 
         if verifiable and svg_content:
@@ -313,6 +333,28 @@ def generate_certificates_task(
 
         html_dir = os.path.join(output_docs_path, folder_name)
         os.makedirs(html_dir, exist_ok=True)
+
+        html_fonts_dir = os.path.join(html_dir, "fonts")
+        os.makedirs(html_fonts_dir, exist_ok=True)
+        
+        import shutil
+        font_face_css = ""
+        for i, fpath in enumerate(font_paths):
+            if i < len(design_data_obj.overlays):
+                dest_fpath = os.path.join(html_fonts_dir, f"font_{i}.ttf")
+                try:
+                    shutil.copy2(fpath, dest_fpath)
+                    font_face_css += f'''
+@font-face {{
+    font-family: "CustomFont_{i}";
+    src: url("fonts/font_{i}.ttf") format("truetype");
+}}
+.cert-text-{i} {{
+    font-family: "CustomFont_{i}", sans-serif !important;
+}}
+'''
+                except Exception as e:
+                    print(f"Error copying font {fpath}: {e}")
 
         with open(os.path.join(html_dir, "index.html"), "w") as html_file:
             html_file.write(f'''
@@ -427,6 +469,8 @@ body {{
     font-family: "Baskerville-old-face", sans-serif;
 }}
 
+{font_face_css}
+
 .container {{
     display: flex;
     flex-direction: column;
@@ -491,7 +535,8 @@ async def generate_certificates(
     svg_template: Optional[UploadFile] = File(None),
     title: str = Form(...),
     verifiable: str = Form("true"),
-    fonts: List[UploadFile] = File(default=[])
+    fonts: List[UploadFile] = File(default=[]),
+    output_format: str = Form("png")
 ):
     # log incoming form values for debugging when validation errors occur
     print("generate_certificates called with", {
@@ -532,7 +577,173 @@ async def generate_certificates(
         date,
         title,
         verifiable_bool,
-        font_contents
+        font_contents,
+        output_format
     )
     
     return JSONResponse(content={"message": "Certificate generation is running in the background."})
+
+@app.post("/api/deploy-github")
+async def deploy_github(
+    github_token: str = Form(...),
+    repo_owner: str = Form(...),
+    repo_name: str = Form(...),
+    output_directory: str = Form(...)
+):
+    try:
+        g = Github(github_token)
+        repo = g.get_repo(f"{repo_owner}/{repo_name}")
+        
+        # Read files from docs dir
+        output_docs_path = os.path.join(base_dir, output_directory, "docs")
+        if not os.path.exists(output_docs_path):
+            return JSONResponse(content={"message": "Docs directory not found. Please ensure verifiable certificates were generated."}, status_code=400)
+            
+        # find the folder inside docs/
+        subdirs = [f.name for f in os.scandir(output_docs_path) if f.is_dir()]
+        target_dir = os.path.join(output_docs_path, subdirs[0]) if subdirs else output_docs_path
+        folder_name = subdirs[0] if subdirs else "docs"
+
+        # prepare files
+        commit_message = f"Deploy verified certificates for {output_directory}"
+        master_ref = repo.get_git_ref("heads/main") # assuming main branch
+        master_sha = master_ref.object.sha
+        base_tree = repo.get_git_tree(master_sha)
+        
+        element_list = []
+        for root, _, files in os.walk(target_dir):
+            for file in files:
+                file_path = os.path.join(root, file)
+                # calculate path relative to output_docs_path to preserve inner structure
+                # We want to place it in the repo under the same folder structure, or directly in root?
+                # Usually we place it in the root or a 'docs' branch.
+                # Let's place it in the repo under `folder_name/`
+                rel_path = os.path.relpath(file_path, output_docs_path)
+                github_path = rel_path.replace("\\", "/") # standardize for github
+                
+                with open(file_path, "rb") as f:
+                    content = f.read()
+
+                # For binary files like fonts
+                if file.endswith(('.ttf', '.woff', '.woff2')):
+                    blob = repo.create_git_blob(base64.b64encode(content).decode("utf-8"), "base64")
+                    element = InputGitTreeElement(github_path, '100644', 'blob', sha=blob.sha)
+                else:
+                    element = InputGitTreeElement(github_path, '100644', 'blob', content=content.decode('utf-8'))
+                element_list.append(element)
+
+        tree = repo.create_git_tree(element_list, base_tree)
+        parent = repo.get_git_commit(master_sha)
+        commit = repo.create_git_commit(commit_message, tree, [parent])
+        master_ref.edit(commit.sha)
+
+        return JSONResponse(content={"message": f"Successfully pushed to {repo_owner}/{repo_name}!"})
+    except Exception as e:
+        import traceback
+        print(traceback.format_exc())
+        return JSONResponse(content={"message": f"Deployment failed: {str(e)}"}, status_code=500)
+
+def create_email_message(to_email, recipient_name, cert_path=None, subject="Your Certificate is Ready", body_text="Dear {Name},\n\nPlease find attached your certificate.\n\nBest regards,\nAutomated System", cc_emails=""):
+    message = MIMEMultipart('mixed')
+    message['To'] = to_email
+    if cc_emails:
+        message['Cc'] = cc_emails
+    message['From'] = 'Generated via Platform'
+    message['Subject'] = subject
+
+    text_content = body_text.replace("{Name}", recipient_name)
+    html_content = f"<html><body><p>{text_content.replace(chr(10), '<br/>')}</p></body></html>"
+
+    alternative_part = MIMEMultipart('alternative')
+    part1 = MIMEText(text_content, 'plain')
+    part2 = MIMEText(html_content, 'html')
+    alternative_part.attach(part1)
+    alternative_part.attach(part2)
+    message.attach(alternative_part)
+
+    if cert_path and os.path.exists(cert_path):
+        with open(cert_path, 'rb') as f:
+            part = MIMEApplication(f.read(), _subtype=os.path.splitext(cert_path)[1].lstrip('.'))
+            part.add_header('Content-Disposition', 'attachment', filename=os.path.basename(cert_path))
+            message.attach(part)
+
+    return message
+
+@app.get("/api/preview-data")
+async def preview_data(output_directory: str):
+    try:
+        output_directory_path = os.path.join(base_dir, output_directory)
+        excel_path = os.path.join(output_directory_path, "data.xlsx")
+        if not os.path.exists(excel_path):
+            return JSONResponse(content={"message": "No data.xlsx found in that directory. Ensure certificates were generated."}, status_code=400)
+        
+        df = pd.read_excel(excel_path)
+        records = df.fillna("").to_dict(orient="records")
+        return JSONResponse(content={"data": records})
+    except Exception as e:
+        return JSONResponse(content={"message": str(e)}, status_code=500)
+
+@app.post("/api/send-emails")
+async def send_emails(
+    output_directory: str = Form(...),
+    email_col: str = Form(...),
+    name_col: str = Form(...),
+    access_token: str = Form(...),
+    subject: str = Form("Your Certificate is Ready"),
+    body_text: str = Form("Dear {Name},\n\nPlease find attached your certificate.\n\nBest regards,\nAutomated System"),
+    cc_emails: str = Form("")
+):
+    def event_stream():
+        try:
+            creds = Credentials(token=access_token)
+            service = build('gmail', 'v1', credentials=creds)
+
+            output_directory_path = os.path.join(base_dir, output_directory)
+            excel_path = os.path.join(output_directory_path, "data.xlsx")
+            cert_dir = os.path.join(output_directory_path, "certificates")
+
+            if not os.path.exists(excel_path):
+                yield json.dumps({"type": "error", "message": "Could not find Excel file for this batch!"}) + "\n"
+                return
+
+            df = pd.read_excel(excel_path)
+            recipients = df[[name_col, email_col]].dropna()
+
+            cert_files = os.listdir(cert_dir) if os.path.isdir(cert_dir) else []
+            def find_cert(name):
+                key = re.sub(r"\s+", "", str(name)).lower()
+                for fname in cert_files:
+                    base = os.path.splitext(fname)[0]
+                    if re.sub(r"\s+", "", base).lower() == key:
+                        return os.path.join(cert_dir, fname)
+                return None
+
+            success_count = 0
+            failed_count = 0
+
+            yield json.dumps({"type": "info", "message": f"Starting sending to {len(recipients)} recipients."}) + "\n"
+
+            for idx, row in recipients.iterrows():
+                recipient_name = str(row[name_col]).strip()
+                to_email = str(row[email_col]).strip()
+                cert_path = find_cert(recipient_name)
+
+                try:
+                    message = create_email_message(to_email, recipient_name, cert_path, subject, body_text, cc_emails)
+                    raw = base64.urlsafe_b64encode(message.as_bytes()).decode()
+                    service.users().messages().send(userId="me", body={'raw': raw}).execute()
+                    success_count += 1
+                    yield json.dumps({"type": "result", "email": to_email, "name": recipient_name, "status": "success"}) + "\n"
+                    time.sleep(1) # simple rate limit fallback
+                except Exception as e:
+                    failed_count += 1
+                    yield json.dumps({"type": "result", "email": to_email, "name": recipient_name, "status": "failed", "error": str(e)}) + "\n"
+
+            yield json.dumps({"type": "done", "success_count": success_count, "failed_count": failed_count}) + "\n"
+
+        except Exception as e:
+            import traceback
+            print(traceback.format_exc())
+            yield json.dumps({"type": "error", "message": f"Email sending failed: {str(e)}"}) + "\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")

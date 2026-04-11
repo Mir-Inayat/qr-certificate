@@ -15,9 +15,10 @@ Key points for an AI coding agent to be immediately productive:
 - How front and back communicate (patterns & examples)
   - Frontend form in `src/components/GenerateCertificate.tsx` builds a FormData and `fetch('/api/generate-certificates', { method: 'POST', body: formData })`.
   - The backend exposes `@app.post('/api/generate-certificates')` in `src/api/index.py` and accepts form fields and file uploads (template, excel, optional svg). The endpoint schedules a background task and returns immediately.
-  - The generation logic (QR creation, PNG overlays, optional SVG->HTML docs) lives in `generate_certificates_task` inside `src/api/index.py`. Look there to understand output layout and JSON schema that the generator emits (`data.json`).
+  - The generation logic (QR creation, PNG overlays, optional SVG->HTML docs) lives in `generate_certificates_task` inside `src/api/index.py`. Look there to understand output layout and JSON schema that the generator emits (`data.json`). The endpoint supports verifiable=true/false (whether to include QR code/static pages), custom fonts, and outputting PDF or PNG formats.
 
 - Project conventions & gotchas
+  - Distribute / output folders: the `distribute` tab is currently under construction. `src/api/__pycache__`, `src/api/certificates` and `src/api/docs` are `.gitignore`d avoiding bulk commits of generated artifacts.
   - Client vs Server components: components with DOM/dragging logic use `"use client"` (see `GenerateCertificate.tsx`). Use `src/components/Dynamic.tsx` for client-only mounting patterns.
   - Excel import: `GenerateCertificate` expects the first row to be headers. The backend expects at least a `Name` column (used to compose codes). Missing headers will raise an HTTP 400.
   - Dynamic overlays now let you define multiple text fields, each with its own `{column}` placeholders. The frontend builds `design_data.overlays` with `textFormat` strings taken directly from the Excel headers. The backend formats each overlay against row values and no longer looks for a separate `overlay_format` or hard‑coded name column.

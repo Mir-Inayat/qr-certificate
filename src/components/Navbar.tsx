@@ -63,6 +63,14 @@ const Navbar = () => {
                     >
                         Generate
                     </Link>
+                    <Link
+                        className={`duration-300 hover:text-blue-500 ${
+                            pathname.includes("/distribute") && "text-blue-500"
+                        } `}
+                        href={"/distribute"}
+                    >
+                        Distribute
+                    </Link>
                 </div>
 
                 <ModeToggle />
@@ -104,6 +112,16 @@ const Navbar = () => {
                         >
                             <Link className=" w-full" href={"/generate"}>
                                 Generate
+                            </Link>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                            asChild
+                            className={`${
+                                pathname.includes("/distribute") && "bg-accent"
+                            }`}
+                        >
+                            <Link className=" w-full" href={"/distribute"}>
+                                Distribute
                             </Link>
                         </DropdownMenuItem>
                     </DropdownMenuContent>

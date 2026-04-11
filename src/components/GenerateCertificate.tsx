@@ -57,6 +57,7 @@ const GenerateCertificate = () => {
     const [date, setDate] = useState<Date>();
     const [columnDefs, setColumnDefs] = useState<ColDef[]>([]);
     const [rowData, setRowData] = useState<any[]>([]);
+    const [outputFormat, setOutputFormat] = useState("png");
     const { resolvedTheme } = useTheme();
 
     const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -83,6 +84,7 @@ const GenerateCertificate = () => {
                 const headers = filteredData[0] as string[];
                 const dynamicColumnDefs = headers.map((header: string) => ({
                     field: header,
+                    editable: true,
                     cellEditor: "agTextCellEditor",
                 }));
                 setColumnDefs(dynamicColumnDefs);
@@ -140,12 +142,25 @@ const GenerateCertificate = () => {
             if (verifiable && svgFile) {
                 formData.append("svg_template", svgFile as Blob);
             }
-            formData.append("excel", excelFile as Blob);
+
+            // Create a new Excel file from the potentially edited rowData
+            if (rowData.length === 0) {
+                alert("Please ensure the Excel data is loaded and not empty.");
+                return;
+            }
+            const worksheet = XLSX.utils.json_to_sheet(rowData);
+            const workbook = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(workbook, worksheet, "Data");
+            const excelBuffer = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
+            const excelBlob = new Blob([excelBuffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+            formData.append("excel", excelBlob, "data.xlsx");
+
             formData.append("output_directory", outputDir);
             formData.append("code_serial", codeSerial);
             formData.append("codes_start_number", codesStartNumber.toString());
             formData.append("design_data", JSON.stringify(designData));
             formData.append("date", date?.toDateString() as string);
+            formData.append("output_format", outputFormat);
 
             overlays.forEach((ov, i) => {
                 if (ov.fontFile) {
@@ -154,12 +169,6 @@ const GenerateCertificate = () => {
                     formData.append("fonts", new Blob([""], { type: "application/octet-stream" }), `empty_${i}.ttf`);
                 }
             });
-
-            // debug output: list all keys being sent
-            console.log("FormData entries:");
-            for (const pair of formData.entries()) {
-                console.log(pair[0], pair[1]);
-            }
 
             try {
                 const response = await fetch("/api/generate-certificates", {
@@ -638,6 +647,33 @@ const GenerateCertificate = () => {
                     />
                 </div>
                 )}
+                <div className="form-group flex items-center space-x-6">
+                    <div>
+                        <label className="block mb-2 font-medium">Output Format:</label>
+                        <div className="flex items-center space-x-4">
+                            <label className="flex items-center space-x-2">
+                                <input
+                                    type="radio"
+                                    value="png"
+                                    checked={outputFormat === "png"}
+                                    onChange={(e) => setOutputFormat(e.target.value)}
+                                    className="h-4 w-4"
+                                />
+                                <span>PNG</span>
+                            </label>
+                            <label className="flex items-center space-x-2">
+                                <input
+                                    type="radio"
+                                    value="pdf"
+                                    checked={outputFormat === "pdf"}
+                                    onChange={(e) => setOutputFormat(e.target.value)}
+                                    className="h-4 w-4"
+                                />
+                                <span>PDF</span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
                 <div className="form-group">
                     <label htmlFor="outputDir">Output Directory:</label>
                     <Input
