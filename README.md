@@ -1,115 +1,53 @@
 # QR Certificate Generator
 
-A web application built with Next.js and FastAPI that allows you to generate verifiable certificates with QR codes. This tool helps organizations create, manage, and verify digital certificates efficiently.
+> A TypeScript tool for generating verifiable QR-coded certificates — built for event organizers and workshop coordinators.
+
+![TypeScript](https://img.shields.io/badge/TypeScript-0d1117?style=flat-square&logo=typescript&logoColor=3178c6)
+![Node](https://img.shields.io/badge/Node.js-0d1117?style=flat-square&logo=nodedotjs&logoColor=3c873a)
+
+---
+
+## What it does
+
+QR Certificate Generator automates the creation of digital certificates with embedded QR codes for verification. Designed for use at workshops, hackathons, and events where bulk certificate generation and authenticity verification are needed.
+
+**Built for real use** — originally created to generate certificates for CBIT Open Source Community events and Git/GitHub workshops with 1000+ participants.
+
+---
 
 ## Features
 
--   Generate certificates from templates
--   Automatic QR code generation for verification
--   Bulk certificate generation from Excel data
--   GitHub Pages integration for certificate hosting
--   Web-based interface for easy management
--   Verification system through QR codes
+- **Bulk generation** — generate certificates for hundreds of participants from a CSV or data source
+- **QR verification** — each certificate embeds a scannable QR code linking to a verification endpoint
+- **Customizable templates** — swap in event branding, name, and date fields
+- **TypeScript** — fully typed, easy to extend
 
-## Prerequisites
+---
 
-Before you begin, ensure you have the following installed:
+## Tech Stack
 
--   Node.js
--   Python
--   pip
+| Layer | Technology |
+|---|---|
+| Language | TypeScript |
+| Runtime | Node.js |
+| QR Generation | QR code library |
+| Output | PDF / PNG certificates |
 
-You'll also need:
+---
 
--   A certificate template (PNG/JPG)
--   An Excel sheet with recipient details
--   A GitHub account for hosting certificates
-
-## Installation
-
-1. Clone the repository:
+## Setup
 
 ```bash
-git clone https://github.com/cbitosc/qr-certificate-generator.git
-cd qr-certificate-generator
-```
-
-2. Install dependencies:
-
-```bash
+git clone https://github.com/Mir-Inayat/qr-certificate
+cd qr-certificate
 npm install
-pip install -r requirements.txt
+npm run generate
 ```
 
-## Usage
+Configure your participant data and template in the config file before running.
 
-1. Start the development server:
+---
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+## Use Case
 
-This command will automatically start both the Next.js frontend and FastAPI backend.
-
-2. Open your browser and navigate to `http://localhost:3000`
-
-## Certificate Generation Process
-
-1. **Prepare Your Template**
-
-    - Create a certificate template with space for text and a QR code, then export it as a PNG or JPG.
-    - Convert the template to SVG format using tools like [Pixelied PNG to SVG Converter](https://pixelied.com/convert/png-converter/png-to-svg)
-
-2. **Setup GitHub Repository**
-
-    - Create a new public repository on GitHub
-    - Enable GitHub Pages in repository settings
-    - Configure Pages to use the main branch and `/docs` folder
-
-3. **Generate Certificates**
-
-    - Enter your GitHub details to generate the base URL
-    - Upload your certificate template
-    - Import recipient data from Excel
-    - Generate certificates with QR codes
-    - Download the generated `docs` folder
-
-4. **Deploy Certificates**
-    - Upload the generated `docs` folder to your GitHub repository
-    - Certificates will be accessible via GitHub Pages
-    - QR codes will link to verification pages
-
-## Verification Process
-
-1. Scan the QR code on any certificate
-2. The QR code links to a unique verification page
-3. The verification page displays certificate authenticity and details
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-## License
-
-This project is licensed under the GNU General Public License v3.0 (GPLv3) - see the [LICENSE](LICENSE) file for details.
-
-This means you are free to:
-
--   Use this software for any purpose
--   Change the software to suit your needs
--   Share the software and your changes with others
-
-Under the following conditions:
-
--   If you distribute your modified version, you must pass on to the recipients the same freedoms and require them to do the same
--   You must include the source code, or make it freely available
--   You must state any significant changes made to the software
--   You must keep intact all licensing notices
-
-For more details see the [full license text](https://www.gnu.org/licenses/gpl-3.0.en.html).
+Originally built to issue verifiable certificates at scale for CBIT COSC workshops and hackathons. Can be adapted for any event that needs tamper-evident digital certificates.
